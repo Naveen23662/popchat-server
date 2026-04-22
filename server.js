@@ -24,6 +24,25 @@ const io     = new Server(server, {
 });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_production';
+const GOOGLE_CLIENT_ID = '1039729729937-mfn09dj06cnuitt1r2a82a8e83cfti1j.apps.googleusercontent.com';
+
+// -- Supabase client --
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+async function supabase(table, method='GET', body=null, query='') {
+  if(!SUPABASE_URL || !SUPABASE_KEY) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+      method, headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json', 'Prefer': method==='POST' ? 'return=representation' : '' },
+      body: body ? JSON.stringify(body) : null,
+    });
+    return method==='GET' ? await res.json() : res.ok;
+  } catch(e) { return null; }
+}
+async function saveUser(email, name, googleId=null) { return supabase('users', 'POST', { email, name, google_id: googleId }); }
+async function isUserBanned(email) { const r = await supabase('users', 'GET', null, `?email=eq.${email}&is_banned=eq.true`); return r && r.length > 0; }
+async function saveReport(by, reason) { return supabase('reports', 'POST', { reported_by: by, reason }); }
 
 // ── Security headers ────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -66,6 +85,26 @@ app.get('/api/ice', (_, res) => {
       },
     ],
   });
+});
+
+// ── Google auth ─────────────────────────────────
+app.post('/api/auth/google', async (req, res) => {
+  const { idToken } = req.body || {};
+  if (!idToken) return res.status(400).json({ error: 'ID token required.' });
+  try {
+    // Verify token with Google
+    const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`);
+    const payload = await r.json();
+    if (payload.aud !== GOOGLE_CLIENT_ID) return res.status(401).json({ error: 'Invalid token.' });
+    if (bannedUsers.has(payload.email)) return res.status(403).json({ error: 'Account banned.' });
+    const token = jwt.sign(
+      { userId: payload.sub, email: payload.email, name: payload.name },
+      JWT_SECRET, { expiresIn: '8h' }
+    );
+    res.json({ token, name: payload.name });
+  } catch(e) {
+    res.status(401).json({ error: 'Google verification failed.' });
+  }
 });
 
 // ── Email auth ──────────────────────────────────
