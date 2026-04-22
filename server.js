@@ -46,6 +46,7 @@ async function saveReport(by, reason) { return supabase('reports', 'POST', { rep
 
 // ── Security headers ────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
+app.set('trust proxy', 1); // Fix for Railway proxy
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json({ limit: '10kb' }));
 
@@ -101,6 +102,7 @@ app.post('/api/auth/google', async (req, res) => {
       { userId: payload.sub, email: payload.email, name: payload.name },
       JWT_SECRET, { expiresIn: '8h' }
     );
+    saveUser(payload.email, payload.name, payload.sub).catch(()=>{});
     res.json({ token, name: payload.name });
   } catch(e) {
     res.status(401).json({ error: 'Google verification failed.' });
@@ -124,7 +126,8 @@ app.post('/api/auth/email', (req, res) => {
     JWT_SECRET,
     { expiresIn: '8h' }
   );
-  res.json({ token, name: email.split('@')[0] });
+    saveUser(email.toLowerCase(), email.split('@')[0]).catch(()=>{});
+    res.json({ token, name: email.split('@')[0] });
 });
 
 // ── Report (REST fallback) ───────────────────────
